@@ -224,7 +224,7 @@ Built by the OpenClaw Security Team
 
 ## Links
 
-- **Security Database:** https://github.com/openclaw/security-db (coming soon)
+- **Security Database:** Included in `db/` directory (86 threats, 384 indicators)
 - **OpenClaw:** https://openclaw.ai
 - **Discord:** https://discord.com/invite/clawd
 
