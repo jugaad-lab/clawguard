@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires Node.js 18+
 metadata:
   author: OpenClaw Security Team
-  version: "1.0.2"
+  version: "1.1.0"
   category: Security
 ---
 
