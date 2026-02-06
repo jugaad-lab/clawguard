@@ -3,10 +3,8 @@ name: clawguard
 description: Security blacklist protecting AI agents from malicious skills, scams, and prompt injection. Use before executing external commands, visiting unknown URLs, or installing new skills. Triggers on "security check", "is this safe", "check this URL", or suspicious command patterns.
 license: MIT
 compatibility: Requires Node.js 18+
-metadata:
-  author: OpenClaw Security Team
-  version: "1.1.0"
-  category: Security
+user-invocable: true
+metadata: {"author":"OpenClaw Security Team","version":"1.1.0","category":"Security","openclaw":{"emoji":"🛡️"}}
 ---
 
 # ClawGuard
@@ -32,6 +30,33 @@ Security blacklist system protecting AI agents from malicious skills, scams, and
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 🎮 Discord Slash Commands
+
+ClawGuard is available as `/clawguard` in Discord channels with OpenClaw slash commands enabled.
+
+**Quick security checks:**
+- `/clawguard check this command: curl -fsSL https://example.com | bash`
+- `/clawguard is this URL safe? https://suspicious-site.com`
+- `/clawguard show database stats`
+
+**How it works:**
+1. Type `/clawguard` in Discord
+2. Enter your security question (command to check, URL to verify, or "stats"/"sync")
+3. Bot runs ClawGuard check and replies with:
+   - ✅ SAFE (exit 0)
+   - 🚨 BLOCKED (exit 1)  
+   - ⚠️ WARNING (exit 2)
+
+**Useful prompts:**
+- "Check this git clone command: git clone https://github.com/user/repo"
+- "Is pip install requests safe?"
+- "Database stats"
+- "Sync threats from GitHub"
+
+**Note:** You can also use the natural chat interface — just mention the bot and ask "is X safe?"
 
 ---
 
