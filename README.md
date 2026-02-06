@@ -16,6 +16,7 @@ ClawGuard protects AI agents from:
 - ✅ **Social Engineering** - Nigerian prince, fake tech support, impersonation
 - ✅ **Prompt Injection** - Direct, indirect, and encoded attempts to override instructions
 - ✅ **Dangerous Infrastructure** - C2 domains, phishing sites, malware distribution
+- ✅ **Insecure MCP Configurations** - Secret exposure, command injection, transport vulnerabilities
 
 Think of it as **CVE for AI agents** + **VirusTotal for skills** + **Spam database for scams**.
 
@@ -60,6 +61,9 @@ clawguard check --type skill --name "api-optimizer"
 # Check for prompt injection
 clawguard check --type message --input "Ignore all previous instructions..."
 
+# Scan MCP server configurations for security issues
+clawguard mcp-scan
+
 # Search database
 clawguard search "wallet drainer"
 
@@ -96,6 +100,102 @@ clawguard stats
 - **Exact lookups:** 0.013ms (75x faster than target)
 - **Pattern matching:** 3.47ms
 - **Database size:** 216KB
+
+## MCP Configuration Scanning
+
+ClawGuard includes a comprehensive security scanner for Model Context Protocol (MCP) server configurations. It automatically discovers and audits MCP servers from popular clients like Claude Desktop, Cursor, VS Code, Windsurf, Claude Code, and Clawdbot.
+
+### What It Scans
+
+- **Auto-discovery** across Claude Desktop, Cursor, VS Code, Windsurf, Claude Code, Clawdbot configs
+- **Secret exposure** in environment variables and command arguments (13+ regex patterns for API keys)
+- **Command injection** via unrestricted shell commands and dangerous patterns (sudo, rm -rf, curl|bash, eval)
+- **Transport security** for unencrypted HTTP, public bindings (0.0.0.0), auth tokens in URLs
+- **Permission scope** including root filesystem access, privileged Docker containers
+- **Configuration issues** like missing commands and relative paths
+- **Prompt injection** patterns embedded in server configurations
+- **Threat database cross-referencing** - The key advantage over standalone tools
+
+### Threat Database Integration
+
+Unlike standalone MCP auditing tools, ClawGuard cross-references discovered server URLs and package names against its threat intelligence database:
+
+- **URL matching:** Server URLs checked against known malicious domains, phishing sites, C2 infrastructure
+- **Package verification:** npm/PyPI packages verified against malicious skill databases
+- **Real-time protection:** Leverages the same threat DB protecting against ClawHavoc and x402 campaigns
+
+### Usage
+
+```bash
+# Scan all discovered MCP configs
+clawguard mcp-scan
+
+# Scan specific config file
+clawguard mcp-scan --config ~/.claude.json
+
+# JSON output for CI/CD
+clawguard mcp-scan --json > mcp-audit.json
+
+# Filter by severity level
+clawguard mcp-scan --severity high
+
+# Show fix suggestions
+clawguard mcp-scan --fix
+
+# Quiet mode (exit codes only)
+clawguard mcp-scan --quiet
+```
+
+### Example Output
+
+```
+┌─────────────────────────────────────────────────┐
+│         🔍 ClawGuard MCP Security Scanner       │
+│      Powered by ClawGuard Threat Intelligence   │
+└─────────────────────────────────────────────────┘
+
+📋 Scan Summary
+   Configs scanned: 3
+     → /Users/user/.claude.json
+     → /Users/user/Library/Application Support/Claude/claude_desktop_config.json
+     → /Users/user/.cursor/mcp.json
+   Servers found:   5
+     🔌 filesystem (stdio)
+     🌐 weather-api (sse)
+     🔌 shell-access (stdio)
+
+⚠️  Findings (4 issues)
+   🔴 CRITICAL    2  ██
+   🟠 HIGH        1  █
+   🟡 MEDIUM      1  █
+
+🛡️  Security Score: 25/100
+
+────────────────────────────────────────────────────────────
+📝 Detailed Findings
+────────────────────────────────────────────────────────────
+
+1. 🔴 Threat database match: Malicious npm package [Threat Database Match]
+   Server: malicious-server
+   CWE: CWE-829
+
+   Description:
+   The package 'evil-mcp-server' matches a known threat in ClawGuard's database...
+```
+
+### CI/CD Integration
+
+Exit codes enable automated security checks:
+
+```bash
+# In CI pipeline
+clawguard mcp-scan --quiet
+case $? in
+  0) echo "✅ MCP config is secure" ;;
+  1) echo "⚠️ High severity issues found"; exit 1 ;;
+  2) echo "🔴 Critical security issues found"; exit 1 ;;
+esac
+```
 
 ## Integration
 
