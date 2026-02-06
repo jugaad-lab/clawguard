@@ -427,9 +427,9 @@ Configuration file: `~/.clawguard/config.json`
 - You choose what context to share
 
 **Open source:**
-- Full code review: https://github.com/cheenu1092-oss/clawguard
 - Threat database: https://github.com/openclaw/security-db
 - Community-driven threat intelligence
+- Full source code available for review
 
 ---
 
@@ -470,13 +470,13 @@ curl -I https://github.com
 ```
 
 **Improve detection:**
-- Review open issues: https://github.com/cheenu1092-oss/clawguard/issues
-- Submit PRs with new patterns or threat entries
+- Submit PRs with new patterns or threat entries to the security-db repository
 - Share incident reports from the wild
+- Review and test new detection patterns
 
 **Community:**
 - Discord: #security channel
-- GitHub Discussions: https://github.com/cheenu1092-oss/clawguard/discussions
+- OpenClaw community forums
 
 ---
 

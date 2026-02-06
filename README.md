@@ -3,7 +3,7 @@
 **Security blacklist system protecting AI agents from malicious skills, scams, and prompt injection**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/cheenu1092-oss/clawguard/releases)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](./CHANGELOG.md)
 
 ---
 
@@ -36,13 +36,13 @@ Think of it as **CVE for AI agents** + **VirusTotal for skills** + **Spam databa
 ## Installation
 
 ```bash
-# Clone and install
-git clone https://github.com/cheenu1092-oss/clawguard.git
-cd clawguard
-npm install
-
-# Or install globally
+# Install from npm (when published)
 npm install -g clawguard
+
+# Or clone and install locally
+# git clone [repository-url]
+# cd clawguard
+# npm install
 ```
 
 ## Quick Start
@@ -224,8 +224,6 @@ Built by the OpenClaw Security Team
 
 ## Links
 
-- **GitHub:** https://github.com/cheenu1092-oss/clawguard
-- **Issues:** https://github.com/cheenu1092-oss/clawguard/issues
 - **Security Database:** https://github.com/openclaw/security-db (coming soon)
 - **OpenClaw:** https://openclaw.ai
 - **Discord:** https://discord.com/invite/clawd
