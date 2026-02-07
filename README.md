@@ -1,6 +1,10 @@
-# 🛡️ ClawGuard
+<p align="center">
+  <img src="assets/logo.png" alt="ClawGuard Logo" width="200">
+</p>
 
-**Security blacklist system protecting AI agents from malicious skills, scams, and prompt injection**
+<h1 align="center">ClawGuard</h1>
+
+<p align="center"><strong>Security blacklist system protecting AI agents from malicious skills, scams, and prompt injection</strong></p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](./CHANGELOG.md)
