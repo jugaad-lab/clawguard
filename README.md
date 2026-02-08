@@ -8,6 +8,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](./CHANGELOG.md)
+[![ClawHub](https://img.shields.io/badge/ClawHub-jugaad--clawguard-teal)](https://clawhub.ai/skills/jugaad-clawguard)
+
+**Install via ClawHub:** `clawhub install jugaad-clawguard`
 
 ---
 
