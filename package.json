@@ -20,11 +20,11 @@
     "prompt-injection",
     "ai-safety"
   ],
-  "author": "OpenClaw Security Team",
+  "author": "jugaad-lab (https://github.com/jugaad-lab)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/openclaw/security-db"
+    "url": "https://github.com/jugaad-lab/clawguard.git"
   },
   "engines": {
     "node": ">=18.0.0"
