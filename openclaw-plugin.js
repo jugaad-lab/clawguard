@@ -12,8 +12,8 @@ import { formatApprovalMessage } from './lib/discord-approval.js';
  */
 export const metadata = {
     name: 'clawguard-security',
-    version: '1.2.0',
-    description: 'Automatic security checks for all tool calls',
+    version: '1.3.0',
+    description: 'Automatic security checks for all tool calls with graduated approval levels',
     hooks: ['before_tool_call']
 };
 
@@ -128,27 +128,186 @@ async function requestDiscordApproval(message, channelId, timeout, context) {
 }
 
 /**
+ * Check if a tool call is a read-only operation (allowed at all levels)
+ */
+function isReadOnlyOperation(toolCall) {
+    const readOnlyTools = ['Read', 'web_fetch'];
+    
+    // File reads
+    if (toolCall.tool === 'Read') {
+        return true;
+    }
+    
+    // Web fetch GETs (but not POSTs)
+    if (toolCall.tool === 'web_fetch') {
+        return true; // web_fetch is read-only by design
+    }
+    
+    return false;
+}
+
+/**
+ * Check if URL is in the known-safe list
+ */
+function isKnownSafeUrl(url) {
+    try {
+        const parsed = new URL(url);
+        const hostname = parsed.hostname.toLowerCase();
+        
+        // Known safe domains
+        const safeDomains = [
+            'github.com',
+            'gitlab.com',
+            'npmjs.com',
+            'pypi.org',
+            'rubygems.org',
+            'crates.io',
+            'docker.com',
+            'anthropic.com',
+            'openai.com',
+            'google.com',
+            'microsoft.com',
+            'stackoverflow.com',
+            'wikipedia.org'
+        ];
+        
+        for (const safe of safeDomains) {
+            if (hostname === safe || hostname.endsWith('.' + safe)) {
+                return true;
+            }
+        }
+        
+        return false;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Before tool call hook
  */
 export async function before_tool_call(toolCall, context) {
     const config = loadConfig();
     const detector = getDetector();
+    const level = config.level || 0; // Default to level 0 (silent)
+    
+    // Level 3 (paranoid): Ask approval for everything except reads
+    if (level === 3) {
+        if (!isReadOnlyOperation(toolCall)) {
+            // Need approval for this operation
+            const message = `🔒 **ClawGuard Level 3 (Paranoid) - Approval Required**\n\n` +
+                           `**Tool:** ${toolCall.tool}\n` +
+                           `**Action:** ${JSON.stringify(toolCall.parameters, null, 2).substring(0, 300)}\n\n` +
+                           `React with ✅ to approve or ❌ to deny`;
+            
+            if (config.discord.enabled && config.discord.channelId) {
+                const approved = await requestDiscordApproval(
+                    message,
+                    config.discord.channelId,
+                    config.discord.timeout || 60000,
+                    context
+                );
+                
+                if (!approved) {
+                    console.log(`🛡️ ClawGuard Level 3: User denied approval`);
+                    return {
+                        block: true,
+                        reason: 'Level 3 (paranoid): User approval required'
+                    };
+                }
+                
+                console.log(`✅ ClawGuard Level 3: User approved`);
+            } else {
+                console.log(`⚠️ ClawGuard Level 3: Discord approval not configured, blocking by default`);
+                return {
+                    block: true,
+                    reason: 'Level 3 (paranoid): Discord approval not configured'
+                };
+            }
+        }
+    }
     
     // Extract what to check
     const command = extractCommand(toolCall);
     const urls = extractUrls(toolCall);
     
-    // Nothing to check
-    if (!command && urls.length === 0) {
-        return { allow: true };
+    // Level 2 (strict): Ask approval for ALL exec/shell commands and unknown URLs
+    if (level >= 2) {
+        if (command) {
+            // All commands need approval at level 2
+            const message = `⚠️ **ClawGuard Level 2 (Strict) - Command Approval**\n\n` +
+                           `**Command:** \`${command.substring(0, 200)}${command.length > 200 ? '...' : ''}\`\n\n` +
+                           `React with ✅ to approve or ❌ to deny`;
+            
+            if (config.discord.enabled && config.discord.channelId) {
+                const approved = await requestDiscordApproval(
+                    message,
+                    config.discord.channelId,
+                    config.discord.timeout || 60000,
+                    context
+                );
+                
+                if (!approved) {
+                    console.log(`🛡️ ClawGuard Level 2: Command denied by user`);
+                    return {
+                        block: true,
+                        reason: 'Level 2 (strict): User denied command execution'
+                    };
+                }
+                
+                console.log(`✅ ClawGuard Level 2: Command approved`);
+            } else {
+                console.log(`⚠️ ClawGuard Level 2: Discord approval not configured, blocking command`);
+                return {
+                    block: true,
+                    reason: 'Level 2 (strict): Discord approval not configured'
+                };
+            }
+        }
+        
+        // Check for unknown URLs at level 2
+        for (const url of urls) {
+            if (!isKnownSafeUrl(url)) {
+                const message = `⚠️ **ClawGuard Level 2 (Strict) - Unknown URL**\n\n` +
+                               `**URL:** ${url}\n\n` +
+                               `This URL is not in the known-safe list.\n` +
+                               `React with ✅ to approve or ❌ to deny`;
+                
+                if (config.discord.enabled && config.discord.channelId) {
+                    const approved = await requestDiscordApproval(
+                        message,
+                        config.discord.channelId,
+                        config.discord.timeout || 60000,
+                        context
+                    );
+                    
+                    if (!approved) {
+                        console.log(`🛡️ ClawGuard Level 2: Unknown URL denied by user`);
+                        return {
+                            block: true,
+                            reason: 'Level 2 (strict): User denied unknown URL'
+                        };
+                    }
+                    
+                    console.log(`✅ ClawGuard Level 2: Unknown URL approved`);
+                } else {
+                    console.log(`⚠️ ClawGuard Level 2: Discord approval not configured, blocking unknown URL`);
+                    return {
+                        block: true,
+                        reason: 'Level 2 (strict): Discord approval not configured'
+                    };
+                }
+            }
+        }
     }
     
+    // ALWAYS run threat DB checks (at all levels)
     // Check command if present
     if (command) {
         const result = await detector.checkCommand(command);
         
         if (result.exitCode === EXIT_CODE.BLOCK) {
-            // BLOCKED - prevent execution
+            // BLOCKED - prevent execution at ALL levels
             console.log(`🛡️ ClawGuard BLOCKED: ${result.message}`);
             if (result.primaryThreat) {
                 console.log(`   Threat: ${result.primaryThreat.name} (${result.primaryThreat.id})`);
@@ -160,33 +319,51 @@ export async function before_tool_call(toolCall, context) {
         }
         
         if (result.exitCode === EXIT_CODE.WARN) {
-            // WARNING - request approval if Discord enabled
-            if (config.discord.enabled && config.discord.channelId) {
-                console.log(`⚠️ ClawGuard WARNING: Requesting Discord approval...`);
-                
-                const approvalMessage = formatApprovalMessage(command, 'command', result.primaryThreat);
-                const approved = await requestDiscordApproval(
-                    approvalMessage,
-                    config.discord.channelId,
-                    config.discord.timeout || 60000,
-                    context
-                );
-                
-                if (!approved) {
-                    console.log(`🛡️ ClawGuard: Discord approval denied/timeout`);
-                    return {
-                        block: true,
-                        reason: 'User denied or approval timeout'
-                    };
+            // WARNING - behavior depends on level
+            if (level === 0) {
+                // Level 0 (silent): Log but allow
+                console.log(`⚠️ ClawGuard WARNING (Level 0 - logged, allowing): ${result.message}`);
+                if (result.primaryThreat) {
+                    console.log(`   Threat: ${result.primaryThreat.name} (${result.primaryThreat.id})`);
                 }
-                
-                console.log(`✅ ClawGuard: Discord approval granted`);
                 return { allow: true };
             } else {
-                // No Discord - allow with warning (can be tightened)
-                console.log(`⚠️ ClawGuard WARNING: ${result.message}`);
-                console.log(`   Discord approval not configured, allowing...`);
-                return { allow: true };
+                // Level 1+ (cautious/strict/paranoid): Request approval
+                if (config.discord.enabled && config.discord.channelId) {
+                    console.log(`⚠️ ClawGuard WARNING: Requesting Discord approval...`);
+                    
+                    const approvalMessage = formatApprovalMessage(command, 'command', result.primaryThreat);
+                    const approved = await requestDiscordApproval(
+                        approvalMessage,
+                        config.discord.channelId,
+                        config.discord.timeout || 60000,
+                        context
+                    );
+                    
+                    if (!approved) {
+                        console.log(`🛡️ ClawGuard: Discord approval denied/timeout`);
+                        return {
+                            block: true,
+                            reason: 'User denied or approval timeout'
+                        };
+                    }
+                    
+                    console.log(`✅ ClawGuard: Discord approval granted`);
+                    return { allow: true };
+                } else {
+                    // No Discord - behavior depends on level
+                    if (level === 0) {
+                        console.log(`⚠️ ClawGuard WARNING: ${result.message}`);
+                        console.log(`   Level 0: Allowing (logged to audit trail)`);
+                        return { allow: true };
+                    } else {
+                        console.log(`⚠️ ClawGuard WARNING: Discord approval not configured, blocking at level ${level}`);
+                        return {
+                            block: true,
+                            reason: `Level ${level}: Discord approval required but not configured`
+                        };
+                    }
+                }
             }
         }
     }
@@ -196,6 +373,7 @@ export async function before_tool_call(toolCall, context) {
         const result = await detector.checkUrl(url);
         
         if (result.exitCode === EXIT_CODE.BLOCK) {
+            // BLOCKED - prevent execution at ALL levels
             console.log(`🛡️ ClawGuard BLOCKED URL: ${result.message}`);
             if (result.primaryThreat) {
                 console.log(`   Threat: ${result.primaryThreat.name} (${result.primaryThreat.id})`);
@@ -207,32 +385,50 @@ export async function before_tool_call(toolCall, context) {
         }
         
         if (result.exitCode === EXIT_CODE.WARN) {
-            // WARNING - request approval if Discord enabled
-            if (config.discord.enabled && config.discord.channelId) {
-                console.log(`⚠️ ClawGuard WARNING: Requesting Discord approval for URL...`);
-                
-                const approvalMessage = formatApprovalMessage(url, 'url', result.primaryThreat);
-                const approved = await requestDiscordApproval(
-                    approvalMessage,
-                    config.discord.channelId,
-                    config.discord.timeout || 60000,
-                    context
-                );
-                
-                if (!approved) {
-                    console.log(`🛡️ ClawGuard: Discord approval denied/timeout`);
-                    return {
-                        block: true,
-                        reason: 'User denied or approval timeout'
-                    };
+            // WARNING - behavior depends on level
+            if (level === 0) {
+                // Level 0 (silent): Log but allow
+                console.log(`⚠️ ClawGuard WARNING URL (Level 0 - logged, allowing): ${result.message}`);
+                if (result.primaryThreat) {
+                    console.log(`   Threat: ${result.primaryThreat.name} (${result.primaryThreat.id})`);
                 }
-                
-                console.log(`✅ ClawGuard: Discord approval granted`);
                 return { allow: true };
             } else {
-                console.log(`⚠️ ClawGuard WARNING: ${result.message}`);
-                console.log(`   Discord approval not configured, allowing...`);
-                return { allow: true };
+                // Level 1+ (cautious/strict/paranoid): Request approval
+                if (config.discord.enabled && config.discord.channelId) {
+                    console.log(`⚠️ ClawGuard WARNING: Requesting Discord approval for URL...`);
+                    
+                    const approvalMessage = formatApprovalMessage(url, 'url', result.primaryThreat);
+                    const approved = await requestDiscordApproval(
+                        approvalMessage,
+                        config.discord.channelId,
+                        config.discord.timeout || 60000,
+                        context
+                    );
+                    
+                    if (!approved) {
+                        console.log(`🛡️ ClawGuard: Discord approval denied/timeout`);
+                        return {
+                            block: true,
+                            reason: 'User denied or approval timeout'
+                        };
+                    }
+                    
+                    console.log(`✅ ClawGuard: Discord approval granted`);
+                    return { allow: true };
+                } else {
+                    if (level === 0) {
+                        console.log(`⚠️ ClawGuard WARNING: ${result.message}`);
+                        console.log(`   Level 0: Allowing (logged to audit trail)`);
+                        return { allow: true };
+                    } else {
+                        console.log(`⚠️ ClawGuard WARNING: Discord approval not configured, blocking at level ${level}`);
+                        return {
+                            block: true,
+                            reason: `Level ${level}: Discord approval required but not configured`
+                        };
+                    }
+                }
             }
         }
     }
@@ -245,14 +441,30 @@ export async function before_tool_call(toolCall, context) {
  * Plugin initialization
  */
 export function init(context) {
-    console.log('🛡️ ClawGuard security plugin loaded');
+    console.log('🛡️ ClawGuard security plugin loaded (v1.3.0)');
     
     const config = loadConfig();
+    const level = config.level || 0;
+    const levelNames = ['silent', 'cautious', 'strict', 'paranoid'];
+    
+    console.log(`   Security level: ${level} (${levelNames[level]})`);
+    
+    if (level === 0) {
+        console.log('   → Threat DB checks only, warnings logged silently');
+    } else if (level === 1) {
+        console.log('   → Asking approval for WARNING-level threats');
+    } else if (level === 2) {
+        console.log('   → Asking approval for warnings + all commands/unknown URLs');
+    } else if (level === 3) {
+        console.log('   → Asking approval for everything (paranoid mode)');
+    }
     
     if (config.discord.enabled && config.discord.channelId) {
         console.log(`   Discord approval enabled (channel: ${config.discord.channelId})`);
     } else {
-        console.log('   Discord approval disabled (warnings will be logged but allowed)');
+        if (level > 0) {
+            console.log('   ⚠️  Discord approval NOT configured (higher levels need it!)');
+        }
     }
     
     if (config.audit.enabled) {

@@ -2,6 +2,34 @@
 
 All notable changes to ClawGuard will be documented in this file.
 
+## [1.3.0] - 2026-02-09
+
+### Added
+- **Security Level System**: Graduated approval "temperature" control
+  - Level 0 (silent): Threat DB checks only, warnings logged silently (DEFAULT)
+  - Level 1 (cautious): Ask approval for WARNING-level threats
+  - Level 2 (strict): Ask approval for warnings + ALL commands/unknown URLs
+  - Level 3 (paranoid): Ask approval for everything except file reads
+  - New CLI command: `clawguard config --level <0-3|name>`
+  - Supports both numeric (0-3) and string names (silent/cautious/strict/paranoid)
+  
+- **Key Principle**: Static threat DB checks ALWAYS run (zero friction), approval layer is optional and graduated
+  
+- **Level 0 is the DEFAULT**: Most users never change from silent mode — just threat intel + audit logging running in background
+
+### Changed
+- Updated `openclaw-plugin.js` to respect security levels
+- Plugin now logs current security level on initialization
+- `clawguard config` now shows current security level
+- `clawguard stats` now includes security level in output
+- Updated SKILL.md with comprehensive security levels documentation
+- Version bumped to 1.3.0
+
+### Documentation
+- Added detailed security levels table to SKILL.md
+- Explained when to use each level
+- Clarified that Level 0 (silent) has ZERO user friction
+
 ## [1.2.0] - 2026-02-09
 
 ### Added

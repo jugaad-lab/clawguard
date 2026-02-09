@@ -4,7 +4,7 @@ description: Security blacklist protecting AI agents from malicious skills, scam
 license: MIT
 compatibility: Requires Node.js 18+
 user-invocable: true
-metadata: {"author":"OpenClaw Security Team","version":"1.2.0","category":"Security","openclaw":{"emoji":"🛡️"}}
+metadata: {"author":"OpenClaw Security Team","version":"1.3.0","category":"Security","openclaw":{"emoji":"🛡️"}}
 ---
 
 # ClawGuard
@@ -30,6 +30,58 @@ Security blacklist system protecting AI agents from malicious skills, scams, and
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 🎚️ Security Levels (Temperature Control)
+
+ClawGuard has a graduated security level system that controls approval friction:
+
+| Level | Name | Behavior |
+|---|---|---|
+| **0** | **silent** (DEFAULT) | Threat DB checks only. Block known threats (exit 1), log warnings silently (exit 2 allowed). **Zero user friction.** |
+| **1** | **cautious** | Everything in silent + ask Discord approval for WARNING-level threats (exit code 2). Safe and blocked are automatic. |
+| **2** | **strict** | Everything in cautious + ask approval for ALL shell/exec commands and unknown URLs. Known-safe URLs pass silently. |
+| **3** | **paranoid** | Ask approval for everything except file reads. Every write, exec, network call, browser action gets human approval. Full lockdown. |
+
+### Key Principles
+
+- **The static threat DB check ALWAYS runs** (at all levels) — this is zero-friction background protection
+- **Level 0 (silent) is the DEFAULT** — most users never change this
+- **Approval requests are optional** — you opt INTO friction by raising the level
+- **Audit trail logs everything** — even at level 0, all checks are logged
+
+### How to Set Your Level
+
+```bash
+# View current level
+clawguard config
+
+# Set to silent (default, zero friction)
+clawguard config --level 0
+clawguard config --level silent
+
+# Set to cautious (ask for warnings only)
+clawguard config --level 1
+clawguard config --level cautious
+
+# Set to strict (ask for commands + unknown URLs)
+clawguard config --level 2
+clawguard config --level strict
+
+# Set to paranoid (ask for everything)
+clawguard config --level 3
+clawguard config --level paranoid
+```
+
+### When to Use Each Level
+
+- **Level 0 (silent)**: Most users, most of the time. Background threat intel + audit logging with zero interruptions.
+- **Level 1 (cautious)**: When you want human review of edge cases (warnings), but trust the AI for clearly safe operations.
+- **Level 2 (strict)**: When working in high-risk environments or testing untrusted code/skills.
+- **Level 3 (paranoid)**: When you want ClawBands-style "human must approve everything" lockdown. Maximum control, maximum friction.
+
+**Important:** Levels 1-3 require Discord approval to be configured (`clawguard config --set discord.channelId --value "YOUR_CHANNEL_ID"`). Without Discord, level 0 is recommended.
 
 ---
 

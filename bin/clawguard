@@ -14,7 +14,7 @@ import { getDatabase, closeDatabase } from '../lib/database.js';
 import { getDetector, RESULT, EXIT_CODE } from '../lib/detector.js';
 import { scanMcpConfigs, getMcpConfigPaths, Severity } from '../lib/mcp-scanner.js';
 import { readAudit, getAuditStats } from '../lib/audit.js';
-import { loadConfig, saveConfig, getConfig } from '../lib/config.js';
+import { loadConfig, saveConfig, getConfig, parseSecurityLevel, getSecurityLevelName, SECURITY_LEVELS } from '../lib/config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const VERSION = '1.2.0';
@@ -370,12 +370,45 @@ async function cmdConfig(args) {
             value: { type: 'string' },
             enable: { type: 'string' },
             disable: { type: 'string' },
+            level: { type: 'string' },
             json: { type: 'boolean' }
         },
         allowPositionals: true
     });
 
     const config = loadConfig();
+
+    // Set security level
+    if (values.level !== undefined) {
+        const level = parseSecurityLevel(values.level);
+        
+        if (level === null) {
+            console.error(c('red', `Invalid security level: ${values.level}`));
+            console.log('Valid levels: 0 (silent), 1 (cautious), 2 (strict), 3 (paranoid)');
+            process.exit(3);
+        }
+        
+        config.level = level;
+        saveConfig(config);
+        
+        const levelName = getSecurityLevelName(level);
+        console.log(c('green', `✅ Security level set to ${level} (${levelName})`));
+        console.log();
+        
+        // Show what the level means
+        const descriptions = {
+            0: 'Threat DB checks only. Block known threats, log warnings silently. Zero friction.',
+            1: 'Ask Discord approval for WARNING-level threats. Safe and blocked are automatic.',
+            2: 'Ask approval for warnings + ALL shell/exec commands and unknown URLs.',
+            3: 'Ask approval for everything except file reads. Full lockdown.'
+        };
+        
+        console.log(c('bold', `Level ${level} (${levelName}):`));
+        console.log(`  ${descriptions[level]}`);
+        console.log();
+        
+        return;
+    }
 
     // Get specific value
     if (values.get) {
@@ -432,9 +465,15 @@ async function cmdConfig(args) {
     if (values.json) {
         console.log(JSON.stringify(config, null, 2));
     } else {
+        const levelName = getSecurityLevelName(config.level || 0);
+        
         console.log();
         console.log(c('bold', '⚙️  ClawGuard Configuration'));
         console.log(c('dim', '═'.repeat(50)));
+        console.log();
+        console.log(c('bold', 'Security Level:'));
+        console.log(`  Current: ${c('cyan', `${config.level || 0} (${levelName})`)}`);
+        console.log(`  ${c('dim', '0=silent (default), 1=cautious, 2=strict, 3=paranoid')}`);
         console.log();
         console.log(c('bold', 'Discord Approval:'));
         console.log(`  Enabled: ${config.discord.enabled ? c('green', 'Yes') : c('red', 'No')}`);
@@ -450,9 +489,10 @@ async function cmdConfig(args) {
         console.log(`  Warn: ${config.detection.thresholds.warn}`);
         console.log(`  Educate: ${config.detection.thresholds.educate}`);
         console.log();
+        console.log(c('dim', 'Use --level <0-3|name> to change security level'));
         console.log(c('dim', 'Use --get <key> to view specific values'));
         console.log(c('dim', 'Use --set <key> --value <value> to update'));
-        console.log(c('dim', 'Example: clawguard config --set discord.channelId --value "123456789"'));
+        console.log(c('dim', 'Example: clawguard config --level cautious'));
         console.log();
     }
 }
@@ -786,14 +826,22 @@ async function cmdStats(args) {
     await ensureInitialized();
     const db = getDatabase();
     const stats = db.getStats();
+    const config = loadConfig();
+    const levelName = getSecurityLevelName(config.level || 0);
 
     if (values.json) {
-        console.log(JSON.stringify(stats, null, 2));
+        const output = {
+            ...stats,
+            security_level: config.level || 0,
+            security_level_name: levelName
+        };
+        console.log(JSON.stringify(output, null, 2));
     } else {
         console.log();
         console.log(c('bold', '📊 ClawGuard Database Statistics'));
         console.log(c('dim', '═'.repeat(40)));
         console.log();
+        console.log(c('cyan', 'Security Level:   ') + `${config.level || 0} (${levelName})`);
         console.log(c('cyan', 'Total Threats:    ') + stats.total_threats);
         console.log(c('cyan', 'Active Threats:   ') + stats.active_threats);
         console.log(c('cyan', 'Total Indicators: ') + stats.total_indicators);
