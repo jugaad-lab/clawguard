@@ -2,6 +2,44 @@
 
 All notable changes to ClawGuard will be documented in this file.
 
+## [1.2.0] - 2026-02-09
+
+### Added
+- **OpenClaw Plugin Hook**: Auto-check all tool calls before execution
+  - Hooks into `before_tool_call` event
+  - Automatically checks `exec` commands and `web_fetch`/`browser` URLs
+  - Blocks on threats (exit code 1), requests approval on warnings (exit code 2)
+  - Plugin file: `openclaw-plugin.js`
+  
+- **Decision Audit Trail**: Comprehensive logging of all security checks
+  - Append-only JSONL log at `~/.clawguard/audit.jsonl`
+  - Logs: timestamp, type, input, verdict, threat details, duration
+  - New CLI command: `clawguard audit` to view recent checks
+  - Flags: `--today` (today's checks only), `--lines N` (last N checks)
+  - Auto-enabled by default
+  
+- **Discord Approval for Warnings**: Human-in-the-loop for edge cases
+  - When plugin detects a warning (exit code 2), sends Discord message
+  - Includes threat details and asks for YES/NO approval
+  - Waits for reaction (✅/❌) with configurable timeout (default 60s)
+  - Blocks if denied or timeout, allows if approved
+  - Only active in plugin mode (CLI keeps existing behavior)
+  
+- **Configuration System**: Centralized config management
+  - New CLI command: `clawguard config` to view/edit settings
+  - Config file: `~/.clawguard/config.json`
+  - Settings for Discord (channel ID, timeout), audit trail, detection thresholds
+  - Flags: `--get`, `--set`, `--enable`, `--disable`
+
+### Changed
+- Detector now auto-logs every check to audit trail
+- Version bumped to 1.2.0
+
+### Documentation
+- Updated SKILL.md with new features section
+- Added PLUGIN.md with plugin installation and usage guide
+- Added tests for new features in `tests/new-features.test.js`
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 

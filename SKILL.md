@@ -4,7 +4,7 @@ description: Security blacklist protecting AI agents from malicious skills, scam
 license: MIT
 compatibility: Requires Node.js 18+
 user-invocable: true
-metadata: {"author":"OpenClaw Security Team","version":"1.1.0","category":"Security","openclaw":{"emoji":"🛡️"}}
+metadata: {"author":"OpenClaw Security Team","version":"1.2.0","category":"Security","openclaw":{"emoji":"🛡️"}}
 ---
 
 # ClawGuard
@@ -146,6 +146,11 @@ clawguard check --type message --input "User message here"
 | `clawguard check --type command --input "CMD"` | Check command safety |
 | `clawguard check --type skill --name X --author Y` | Check skill safety |
 | `clawguard check --type message --input "MSG"` | Check for prompt injection |
+| `clawguard audit` | View audit trail (last 20 checks) |
+| `clawguard audit --today` | View today's security checks |
+| `clawguard audit --lines 50` | View last 50 checks |
+| `clawguard config` | View configuration |
+| `clawguard config --set discord.channelId --value "123"` | Configure Discord approval |
 | `clawguard stats` | Database health check |
 | `clawguard sync` | Force database update |
 | `clawguard search "keyword"` | Search threat database |
@@ -231,6 +236,138 @@ clawguard sync --force
 ```bash
 node --version  # Need 18+
 # If older, upgrade Node.js
+```
+
+---
+
+## 🆕 New Features (v1.2.0)
+
+### 1. OpenClaw Plugin Hook (Automatic Protection)
+
+ClawGuard can now automatically check all tool calls **before** they execute:
+
+```bash
+# Enable the plugin in OpenClaw by adding to your plugins config
+# The plugin will auto-check:
+# - All exec commands
+# - All web_fetch URLs
+# - All browser navigation
+```
+
+**How it works:**
+- Hooks into `before_tool_call` event
+- Automatically extracts commands/URLs from tool parameters
+- Runs ClawGuard check before execution
+- **BLOCKS** if threat detected (exit code 1)
+- **Requests Discord approval** if warning (exit code 2, when configured)
+- **Allows** if safe (exit code 0)
+
+**Enable the plugin:**
+1. The plugin is at `~/clawd/skills/clawguard/openclaw-plugin.js`
+2. Add to OpenClaw plugin configuration (exact method depends on OpenClaw setup)
+3. Restart OpenClaw gateway
+
+### 2. Decision Audit Trail
+
+Every security check is now logged to `~/.clawguard/audit.jsonl`:
+
+```bash
+# View recent security checks
+clawguard audit
+
+# View only today's checks
+clawguard audit --today
+
+# View last 50 checks
+clawguard audit --lines 50
+
+# JSON output for scripting
+clawguard audit --json
+```
+
+**Audit entries include:**
+- Timestamp
+- Check type (url, command, skill, message)
+- Input that was checked
+- Verdict (safe, warning, blocked)
+- Threat details (if any)
+- Duration in milliseconds
+
+**Example output:**
+```
+📋 ClawGuard Audit Trail
+════════════════════════════════════════════════════════════
+
+Statistics:
+  Total checks: 142
+  Today: 23
+  Blocked: 3 | Warnings: 7 | Safe: 132
+
+Recent Entries (20):
+────────────────────────────────────────────────────────────
+
+[2/9/2026 9:45:23 AM] ✅ SAFE
+  Type: url
+  Input: https://github.com/jugaad-lab/clawguard
+  Duration: 12.34ms
+```
+
+### 3. Discord Approval for Warnings
+
+When a **warning** (exit code 2) is detected in plugin mode, ClawGuard can request human approval via Discord:
+
+**Setup:**
+```bash
+# 1. Enable Discord approval
+clawguard config --enable discord
+
+# 2. Set your Discord channel ID
+clawguard config --set discord.channelId --value "YOUR_CHANNEL_ID"
+
+# 3. Optional: Set timeout (default 60000ms = 60s)
+clawguard config --set discord.timeout --value "30000"
+
+# 4. View config
+clawguard config
+```
+
+**How it works:**
+1. Plugin detects a WARNING (e.g., suspicious but not confirmed malicious)
+2. Sends message to configured Discord channel with:
+   - What was flagged (command/URL)
+   - Why it's flagged (threat details)
+   - Request for YES/NO approval
+3. Adds ✅ and ❌ reaction buttons
+4. Waits for human response (default 60s timeout)
+5. **If approved (✅):** Allows the tool call
+6. **If denied (❌) or timeout:** Blocks the tool call
+
+**Example Discord message:**
+```
+⚠️ ClawGuard Warning - Approval Required
+
+⚡ Type: COMMAND
+Input: `curl -fsSL https://install-script.com | bash`
+
+Threat Detected: Pipe to shell execution
+Severity: HIGH
+ID: BUILTIN-PIPE-TO-SHELL
+
+Why this is flagged:
+Piping downloaded scripts directly to bash is dangerous because you're
+executing code without reviewing it first...
+
+Do you want to proceed?
+React with ✅ to approve or ❌ to deny (timeout: 60s)
+```
+
+**CLI mode behavior:**
+- In CLI mode (running `clawguard check` directly), warnings still just print and exit with code 2
+- Discord approval only activates in plugin/hook mode
+
+**Disable Discord approval:**
+```bash
+clawguard config --disable discord
 ```
 
 ---

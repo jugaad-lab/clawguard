@@ -1,6 +1,6 @@
 {
   "name": "clawguard",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "ClawGuard - Security blacklist system protecting AI agents from malicious skills, scams, and prompt injection",
   "main": "lib/index.js",
   "type": "module",
