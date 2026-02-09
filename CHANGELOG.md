@@ -2,6 +2,72 @@
 
 All notable changes to ClawGuard will be documented in this file.
 
+## [1.3.0] - 2026-02-09
+
+### Added
+- **Security Level System**: Graduated approval "temperature" control
+  - Level 0 (silent): Threat DB checks only, warnings logged silently (DEFAULT)
+  - Level 1 (cautious): Ask approval for WARNING-level threats
+  - Level 2 (strict): Ask approval for warnings + ALL commands/unknown URLs
+  - Level 3 (paranoid): Ask approval for everything except file reads
+  - New CLI command: `clawguard config --level <0-3|name>`
+  - Supports both numeric (0-3) and string names (silent/cautious/strict/paranoid)
+  
+- **Key Principle**: Static threat DB checks ALWAYS run (zero friction), approval layer is optional and graduated
+  
+- **Level 0 is the DEFAULT**: Most users never change from silent mode — just threat intel + audit logging running in background
+
+### Changed
+- Updated `openclaw-plugin.js` to respect security levels
+- Plugin now logs current security level on initialization
+- `clawguard config` now shows current security level
+- `clawguard stats` now includes security level in output
+- Updated SKILL.md with comprehensive security levels documentation
+- Version bumped to 1.3.0
+
+### Documentation
+- Added detailed security levels table to SKILL.md
+- Explained when to use each level
+- Clarified that Level 0 (silent) has ZERO user friction
+
+## [1.2.0] - 2026-02-09
+
+### Added
+- **OpenClaw Plugin Hook**: Auto-check all tool calls before execution
+  - Hooks into `before_tool_call` event
+  - Automatically checks `exec` commands and `web_fetch`/`browser` URLs
+  - Blocks on threats (exit code 1), requests approval on warnings (exit code 2)
+  - Plugin file: `openclaw-plugin.js`
+  
+- **Decision Audit Trail**: Comprehensive logging of all security checks
+  - Append-only JSONL log at `~/.clawguard/audit.jsonl`
+  - Logs: timestamp, type, input, verdict, threat details, duration
+  - New CLI command: `clawguard audit` to view recent checks
+  - Flags: `--today` (today's checks only), `--lines N` (last N checks)
+  - Auto-enabled by default
+  
+- **Discord Approval for Warnings**: Human-in-the-loop for edge cases
+  - When plugin detects a warning (exit code 2), sends Discord message
+  - Includes threat details and asks for YES/NO approval
+  - Waits for reaction (✅/❌) with configurable timeout (default 60s)
+  - Blocks if denied or timeout, allows if approved
+  - Only active in plugin mode (CLI keeps existing behavior)
+  
+- **Configuration System**: Centralized config management
+  - New CLI command: `clawguard config` to view/edit settings
+  - Config file: `~/.clawguard/config.json`
+  - Settings for Discord (channel ID, timeout), audit trail, detection thresholds
+  - Flags: `--get`, `--set`, `--enable`, `--disable`
+
+### Changed
+- Detector now auto-logs every check to audit trail
+- Version bumped to 1.2.0
+
+### Documentation
+- Updated SKILL.md with new features section
+- Added PLUGIN.md with plugin installation and usage guide
+- Added tests for new features in `tests/new-features.test.js`
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
