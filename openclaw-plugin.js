@@ -85,6 +85,9 @@ async function requestDiscordApproval(message, channelId, timeout, context) {
             emoji: '❌'
         });
         
+        // Get bot's own user ID to filter out its reactions
+        const botUserId = context.botUserId || null;
+        
         // Wait for reaction with timeout
         const startTime = Date.now();
         while (Date.now() - startTime < timeout) {
@@ -95,15 +98,22 @@ async function requestDiscordApproval(message, channelId, timeout, context) {
             });
             
             if (reactions) {
-                // Check for approval (✅)
-                const approved = reactions.find(r => r.emoji === '✅' && r.users.length > 0);
-                if (approved) {
+                // Filter out bot's own reactions — only count human reactions
+                const humanReaction = (r, emoji) => {
+                    if (r.emoji !== emoji) return false;
+                    const humanUsers = botUserId 
+                        ? r.users.filter(u => u.id !== botUserId)
+                        : r.users;
+                    return humanUsers.length > 0;
+                };
+                
+                // Check for approval (✅) from a human
+                if (reactions.find(r => humanReaction(r, '✅'))) {
                     return true;
                 }
                 
-                // Check for denial (❌)
-                const denied = reactions.find(r => r.emoji === '❌' && r.users.length > 0);
-                if (denied) {
+                // Check for denial (❌) from a human
+                if (reactions.find(r => humanReaction(r, '❌'))) {
                     return false;
                 }
             }
@@ -131,8 +141,6 @@ async function requestDiscordApproval(message, channelId, timeout, context) {
  * Check if a tool call is a read-only operation (allowed at all levels)
  */
 function isReadOnlyOperation(toolCall) {
-    const readOnlyTools = ['Read', 'web_fetch'];
-    
     // File reads
     if (toolCall.tool === 'Read') {
         return true;

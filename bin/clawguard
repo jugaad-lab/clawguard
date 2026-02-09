@@ -17,7 +17,7 @@ import { readAudit, getAuditStats } from '../lib/audit.js';
 import { loadConfig, saveConfig, getConfig, parseSecurityLevel, getSecurityLevelName, SECURITY_LEVELS } from '../lib/config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 // Colors for terminal output
 const colors = {
@@ -385,6 +385,19 @@ async function cmdConfig(args) {
         if (level === null) {
             console.error(c('red', `Invalid security level: ${values.level}`));
             console.log('Valid levels: 0 (silent), 1 (cautious), 2 (strict), 3 (paranoid)');
+            process.exit(3);
+        }
+        
+        // Pre-flight check: levels 2+ require Discord to be configured
+        if (level >= 2 && (!config.discord || !config.discord.enabled || !config.discord.channelId)) {
+            console.error(c('yellow', `⚠️  Level ${level} requires Discord approval to be configured.`));
+            console.log(`Without Discord, all commands/URLs would be blocked at this level.`);
+            console.log();
+            console.log(`Configure Discord first:`);
+            console.log(`  ${c('cyan', 'clawguard config --enable discord')}`);
+            console.log(`  ${c('cyan', 'clawguard config --set discord.channelId --value <YOUR_CHANNEL_ID>')}`);
+            console.log();
+            console.log(`Then retry: ${c('cyan', `clawguard config --level ${level}`)}`);
             process.exit(3);
         }
         
