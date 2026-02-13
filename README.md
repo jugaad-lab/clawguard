@@ -9,6 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](./CHANGELOG.md)
 [![ClawHub](https://img.shields.io/badge/ClawHub-jugaad--clawguard-teal)](https://clawhub.ai/skills/jugaad-clawguard)
+[![GitHub Repo stars](https://img.shields.io/github/stars/jugaad-lab/clawguard?style=social)](https://github.com/jugaad-lab/clawguard/stargazers)
 
 **Install via ClawHub:** `clawhub install jugaad-clawguard`
 
@@ -336,6 +337,21 @@ Built by the OpenClaw Security Team
 - **Security Database:** Included in `db/` directory (86 threats, 384 indicators)
 - **OpenClaw:** https://openclaw.ai
 - **Discord:** https://discord.com/invite/clawd
+
+---
+## More from Jugaad Lab 🔧
+| Tool | What it does |
+|------|-------------|
+| [claude-code-mastery](https://github.com/jugaad-lab/claude-code-mastery) | Master Claude Code with subagents & automation |
+| [tokenmeter](https://github.com/jugaad-lab/tokenmeter) | Track AI token usage & costs locally |
+| [clawguard](https://github.com/jugaad-lab/clawguard) | Security blacklist for AI agents |
+| [clawdscan](https://github.com/jugaad-lab/clawdscan) | Session health analyzer for OpenClaw |
+| [skilldoc](https://github.com/jugaad-lab/skilldoc) | Skill health checker for OpenClaw |
+| [tribe-protocol](https://github.com/jugaad-lab/tribe-protocol) | Trust & access control for AI bots |
+| [discord-voice-plugin](https://github.com/jugaad-lab/discord-voice-plugin) | Voice conversations with AI in Discord |
+| [worldmonitor](https://github.com/jugaad-lab/worldmonitor) | Real-time global intelligence dashboard |
+
+⭐ **Found these useful? Star the repos you like!**
 
 ---
 
