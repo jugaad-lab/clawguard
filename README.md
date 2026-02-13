@@ -12,6 +12,8 @@
 
 **Install via ClawHub:** `clawhub install jugaad-clawguard`
 
+> ⭐ **Found this useful? [Star this repo](https://github.com/jugaad-lab/clawguard)** to help others discover it!
+
 ---
 
 ## What It Does
@@ -338,3 +340,9 @@ Built by the OpenClaw Security Team
 ---
 
 **Protect your AI agents. Install ClawGuard today.** 🛡️
+
+## 🤝 Contributing
+
+Found a bug? Have an idea? [Open an issue](https://github.com/jugaad-lab/clawguard/issues) or submit a PR!
+
+If this tool saved you time, please ⭐ **star this repo** — it helps others find it.
